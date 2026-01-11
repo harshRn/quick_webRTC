@@ -112,7 +112,7 @@ async fn main() {
 
     // run it
     // let listener = tokio::net::TcpListener::bind("127.0.0.1:9000")
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:9000").await.unwrap();
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:9000").await.unwrap(); // to test over wifi
     println!("listening on {}...", listener.local_addr().unwrap());
     let _ = axum::serve(
         listener,
