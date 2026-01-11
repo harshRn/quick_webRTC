@@ -9,6 +9,8 @@ let sendMessage = null;
 const queue = [];
 let creator = null;
 let cam_opened = null;
+let userStream = null;
+let rtcPeerConnection = null;
 
 // Contains the stun server URL we will be using.
 let iceServers = {
@@ -19,7 +21,9 @@ let iceServers = {
 };
 
 function createSocket(roomName) {
-  const ws = new WebSocket(`ws://localhost:9000/ws/${roomName}`);
+  // const ws = new WebSocket(`ws://192.168.1.17:9000/ws/${roomName}`);
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  const ws = new WebSocket(`${protocol}//${window.location.host}/ws/abc`);
 
   function send(msg) {
     if (ws.readyState === WebSocket.OPEN) {
@@ -70,6 +74,10 @@ function connect() {
   // sendMessage("first message from client side");
 }
 
+function parse(msg) {
+  return typeof msg === "string" ? JSON.parse(msg) : msg;
+}
+
 // Parse incoming WebSocket message
 function parseMessage(rawMessage) {
   try {
@@ -85,7 +93,7 @@ function parseMessage(rawMessage) {
 
     // Handle object messages
     const messageType = Object.keys(parsed)[0];
-    const messageData = JSON.parse(parsed[messageType]);
+    const messageData = parse(parsed[messageType]);
 
     return {
       type: messageType,
@@ -99,6 +107,7 @@ function parseMessage(rawMessage) {
 
 // Route message to appropriate handler
 function handleMessage(rawMessage, ws) {
+  console.log("rawMessage :" + rawMessage);
   const message = parseMessage(rawMessage);
 
   if (!message) return;
@@ -113,14 +122,21 @@ function open_cam(created, socket) {
   creator = created;
   navigator.mediaDevices
     .getUserMedia({
-      audio: false,
-      video: { width: 1280, height: 720 },
+      audio: true,
+      // video: { width: 1280, height: 720 },
+
+      video: {
+        facingMode: "user", // Instead of width/height
+      },
     })
     .then(function (stream) {
       /* use the stream */
       userStream = stream;
       divVideoChatLobby.style = "display:none";
       userVideo.srcObject = stream;
+      // REMOVE
+      userVideo.setAttribute("playsinline", "");
+
       userVideo.onloadedmetadata = function (e) {
         userVideo.play();
       };
@@ -147,13 +163,77 @@ function init_rtpc_connection() {
       .createOffer()
       .then((offer) => {
         rtcPeerConnection.setLocalDescription(offer);
-        socket.emit("offer", offer, roomName); // change
+        let sdp_message = {};
+        sdp_message["Offer"] = offer;
+        socket.send(JSON.stringify(sdp_message));
       })
-
       .catch((error) => {
         console.log(error);
       });
   }
+}
+
+// Triggered on receiving an offer from the person who created the room.
+function check_offer(offer) {
+  if (!creator) {
+    rtcPeerConnection = new RTCPeerConnection(iceServers);
+    rtcPeerConnection.onicecandidate = OnIceCandidateFunction;
+    rtcPeerConnection.ontrack = OnTrackFunction;
+    rtcPeerConnection.addTrack(userStream.getTracks()[0], userStream);
+    rtcPeerConnection.addTrack(userStream.getTracks()[1], userStream);
+    rtcPeerConnection.setRemoteDescription(offer);
+    rtcPeerConnection
+      .createAnswer()
+      .then((answer) => {
+        rtcPeerConnection.setLocalDescription(answer);
+        let answer_message = {};
+        answer_message["Answer"] = answer;
+        // socket.emit("answer", answer, roomName);
+        socket.send(JSON.stringify(answer_message));
+      })
+      .catch((error) => {
+        console.log(error);
+      });
+  }
+}
+
+// Triggered on receiving an answer from the person who joined the room.
+function check_answer(answer) {
+  if (creator) {
+    rtcPeerConnection.setRemoteDescription(answer);
+  }
+}
+
+// Implementing the OnIceCandidateFunction which is part of the RTCPeerConnection Interface.
+
+function OnIceCandidateFunction(event) {
+  if (event.candidate) {
+    // socket.emit("candidate", event.candidate, roomName);
+    let candidate_msg = {};
+    let candidate = JSON.parse(JSON.stringify(event.candidate));
+    candidate.creator = creator;
+    candidate_msg["Candidate"] = candidate;
+    console.log("sending : " + candidate_msg);
+    socket.send(JSON.stringify(candidate_msg));
+  }
+}
+
+// // Implementing the OnTrackFunction which is part of the RTCPeerConnection Interface.
+
+function OnTrackFunction(event) {
+  peerVideo.srcObject = event.streams[0];
+  peerVideo.onloadedmetadata = function (_e) {
+    peerVideo.play();
+  };
+}
+
+function check_candidate(candidate) {
+  if (candidate.creator === creator) {
+    // no way to distinguish when broadcasting. re-work in case of more than 2 callers
+    return;
+  }
+  let icecandidate = new RTCIceCandidate(candidate);
+  rtcPeerConnection.addIceCandidate(icecandidate);
 }
 
 // Message handlers
@@ -175,6 +255,15 @@ const messageHandlers = {
   },
   Ready: (data) => {
     init_rtpc_connection();
+  },
+  Offer: (data) => {
+    check_offer(data);
+  },
+  Answer: (data) => {
+    check_answer(data);
+  },
+  Candidate: (data) => {
+    check_candidate(data);
   },
 };
 

@@ -10,6 +10,22 @@ use std::cmp::Eq;
 
 // enum MType {candidate(string), offer(string), answer(string), text(string)} -> struct Msg { type: Option<MType> }
 
+#[derive(Serialize, Deserialize, Clone, Debug)]
+struct CandidateMsg {
+    candidate: String,
+    sdpMLineIndex: i32,
+    sdpMid: String,
+    usernameFragment: String,
+    creator: Option<bool>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+struct SDPMessage {
+    #[serde(rename = "type")]
+    type_sdp: String,
+    sdp: String,
+}
+
 #[derive(Serialize)]
 enum ConnectionResult {
     Created,
@@ -26,9 +42,9 @@ struct ConnectionDetails {
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 enum MType {
-    Candidate(String),
-    Offer(String),
-    Answer(String),
+    Candidate(CandidateMsg),
+    Offer(SDPMessage),
+    Answer(SDPMessage),
     Alert(String),
     Text(String),
     Ready,
@@ -95,9 +111,8 @@ async fn main() {
         .with_state(state);
 
     // run it
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:9000")
-        .await
-        .unwrap();
+    // let listener = tokio::net::TcpListener::bind("127.0.0.1:9000")
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:9000").await.unwrap();
     println!("listening on {}...", listener.local_addr().unwrap());
     let _ = axum::serve(
         listener,
@@ -193,6 +208,7 @@ async fn handle_socket(
     let mut recv_task = tokio::spawn(async move {
         while let Some(Ok(Message::Text(text))) = receiver.next().await {
             // Add username before message.
+            println!("text : {:#?}", text.to_string());
             let message_type = match serde_json::from_str::<MType>(&text.to_string()) {
                 Ok(m) => m,
                 Err(e) => {
@@ -205,7 +221,17 @@ async fn handle_socket(
                 MType::None => {
                     println!("fk fk fk ");
                 }
-                _ => todo!(),
+                MType::Offer(o) => {
+                    offer(&tx, o);
+                }
+                MType::Answer(ans) => {
+                    println!("answer received : {:#?}", ans);
+                    answer(&tx, ans);
+                }
+                MType::Candidate(candidate_msg) => {
+                    candidate(&tx, candidate_msg);
+                }
+                _ => println!("message type is {:#?}", message_type),
             }
         }
     });
@@ -265,16 +291,16 @@ fn ready(tx: tokio::sync::broadcast::Sender<String>) {
 }
 
 // Triggered when server gets an icecandidate from a peer in the room.
-fn candidate(tx: &tokio::sync::broadcast::Sender<String>) {
-    todo!()
+fn candidate(tx: &tokio::sync::broadcast::Sender<String>, candidate: CandidateMsg) {
+    let _ = tx.send(serde_json::to_string(&MType::Candidate(candidate)).unwrap());
 }
 
 // Triggered when server gets an offer from a peer in the room.
-fn offer(tx: &tokio::sync::broadcast::Sender<String>) {
-    todo!()
+fn offer(tx: &tokio::sync::broadcast::Sender<String>, offer: SDPMessage) {
+    let _ = tx.send(serde_json::to_string(&MType::Offer(offer)).unwrap());
 }
 
 // Triggered when server gets an answer from a peer in the room.
-fn answer(tx: &tokio::sync::broadcast::Sender<String>) {
-    todo!()
+fn answer(tx: &tokio::sync::broadcast::Sender<String>, answer: SDPMessage) {
+    let _ = tx.send(serde_json::to_string(&MType::Answer(answer)).unwrap());
 }
