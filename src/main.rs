@@ -112,7 +112,7 @@ async fn main() {
 
     // run it
     // let listener = tokio::net::TcpListener::bind("127.0.0.1:9000")
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:9000").await.unwrap(); // to test over wifi
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:9000").await.unwrap(); // to test overwifi
     println!("listening on {}...", listener.local_addr().unwrap());
     let _ = axum::serve(
         listener,
@@ -208,31 +208,33 @@ async fn handle_socket(
     let mut recv_task = tokio::spawn(async move {
         while let Some(Ok(Message::Text(text))) = receiver.next().await {
             // Add username before message.
-            println!("text : {:#?}", text.to_string());
-            let message_type = match serde_json::from_str::<MType>(&text.to_string()) {
-                Ok(m) => m,
-                Err(e) => {
-                    println!("Error : {e}");
-                    MType::None
-                }
-            };
-            match message_type {
-                MType::Ready => ready(tx2.clone()),
-                MType::None => {
-                    println!("fk fk fk ");
-                }
-                MType::Offer(o) => {
-                    offer(&tx, o);
-                }
-                MType::Answer(ans) => {
-                    println!("answer received : {:#?}", ans);
-                    answer(&tx, ans);
-                }
-                MType::Candidate(candidate_msg) => {
-                    candidate(&tx, candidate_msg);
-                }
-                _ => println!("message type is {:#?}", message_type),
-            }
+            let msg = text.to_string();
+            print!("text : {:#?}", msg);
+            generic_send(tx2.clone(), msg);
+            // let message_type = match serde_json::from_str::<MType>(&text.to_string()) {
+            //     Ok(m) => m,
+            //     Err(e) => {
+            //         println!("Error : {e}");
+            //         MType::None
+            //     }
+            // };
+            // match message_type {
+            //     MType::Ready => ready(tx2.clone()),
+            //     MType::None => {
+            //         println!("fk fk fk ");
+            //     }
+            //     MType::Offer(o) => {
+            //         offer(&tx, o);
+            //     }
+            //     MType::Answer(ans) => {
+            //         println!("answer received : {:#?}", ans);
+            //         answer(&tx, ans);
+            //     }
+            //     MType::Candidate(candidate_msg) => {
+            //         candidate(&tx, candidate_msg);
+            //     }
+            //     _ => println!("message type is {:#?}", message_type),
+            // }
         }
     });
 
@@ -241,8 +243,6 @@ async fn handle_socket(
         _ = &mut send_task => recv_task.abort(),
         _ = &mut recv_task => send_task.abort(),
     };
-
-    // send_alert(&(addr.to_string()), "left", &room_name, &tx);
 
     {
         let mut lock = state.data.lock().await;
@@ -285,6 +285,9 @@ fn send_alert(ip: &str, alert_type: &str, room: &str, tx: &tokio::sync::broadcas
 }
 
 // broadcasting messages:
+fn generic_send(tx: tokio::sync::broadcast::Sender<String>, msg: String) {
+    let _ = tx.send(msg);
+}
 
 fn ready(tx: tokio::sync::broadcast::Sender<String>) {
     let _ = tx.send(serde_json::to_string(&MType::Ready).unwrap());
